@@ -36,8 +36,6 @@ func DaemonSet(
 	labels map[string]string,
 	annotations map[string]string,
 ) *appsv1.DaemonSet {
-	runAsUser := int64(0)
-	privileged := true
 	serviceName := fmt.Sprintf("octavia-%s", instance.Spec.Role)
 
 	// The API pod has an extra volume so the API and the provider agent can
@@ -132,14 +130,6 @@ func DaemonSet(
 							Resources:      instance.Spec.Resources,
 							ReadinessProbe: readinessProbe,
 							LivenessProbe:  livenessProbe,
-							SecurityContext: &corev1.SecurityContext{
-								Capabilities: &corev1.Capabilities{
-									Add:  []corev1.Capability{"NET_ADMIN", "SYS_ADMIN", "SYS_NICE"},
-									Drop: []corev1.Capability{},
-								},
-								RunAsUser:  &runAsUser,
-								Privileged: &privileged,
-							},
 						},
 					},
 					Volumes: volumes,
@@ -171,6 +161,33 @@ func DaemonSet(
 		VolumeMounts:         octavia.GetInitVolumeMounts(),
 	}
 	daemonset.Spec.Template.Spec.InitContainers = octavia.InitContainer(initContainerDetails)
+
+	args := []string{
+		"-c",
+		"/usr/local/bin/container-scripts/controller_init.sh",
+	}
+	runAsUser := int64(0)
+	privileged := true
+	controllerInitContainer := corev1.Container{
+		Name:  "controller-init",
+		Image: instance.Spec.ContainerImage,
+		Command: []string{
+			"/bin/bash",
+		},
+		Args:         args,
+		Env:          env.MergeEnvs([]corev1.EnvVar{}, envVars),
+		VolumeMounts: volumeMounts,
+		Resources:    instance.Spec.Resources,
+		SecurityContext: &corev1.SecurityContext{
+			Capabilities: &corev1.Capabilities{
+				Add:  []corev1.Capability{"NET_ADMIN", "SYS_ADMIN", "SYS_NICE"},
+				Drop: []corev1.Capability{},
+			},
+			RunAsUser:  &runAsUser,
+			Privileged: &privileged,
+		},
+	}
+	daemonset.Spec.Template.Spec.InitContainers = append(daemonset.Spec.Template.Spec.InitContainers, controllerInitContainer)
 
 	return daemonset
 }
