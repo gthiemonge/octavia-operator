@@ -45,7 +45,7 @@ const (
 	OctaviaInternalPort int32 = 9876
 
 	// ApacheInternalPort -
-	ApacheInternalPort int32 = 80
+	ApacheInternalPort int32 = 443
 
 	// AdminTenantName
 	AdminTenant = "admin"

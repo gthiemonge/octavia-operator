@@ -18,6 +18,7 @@ package octavia
 import (
 	"fmt"
 
+	"github.com/openstack-k8s-operators/lib-common/modules/common/service"
 	octaviav1 "github.com/openstack-k8s-operators/octavia-operator/api/v1beta1"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -32,11 +33,12 @@ type ImageUploadDetails struct {
 
 const (
 	// ServiceCommand -
-	ServiceCommand = "cp -f /usr/local/apache2/conf/httpd.conf /etc/httpd/conf/httpd.conf && /usr/bin/run-httpd"
+	ServiceCommand = "/usr/local/bin/container-scripts/image_upload_run.sh"
 )
 
 func getVolumes(name string) []corev1.Volume {
-	var config0640AccessMode int32 = 0640
+	var scriptsVolumeDefaultMode int32 = 0755
+	var config0640AccessMode int32 = 0644
 
 	return []corev1.Volume{
 		{
@@ -46,12 +48,27 @@ func getVolumes(name string) []corev1.Volume {
 			},
 		},
 		{
-			Name: "httpd-config",
+			Name: "scripts",
+			VolumeSource: corev1.VolumeSource{
+				Secret: &corev1.SecretVolumeSource{
+					DefaultMode: &scriptsVolumeDefaultMode,
+					SecretName:  name + "-scripts",
+				},
+			},
+		},
+		{
+			Name: "config-data",
 			VolumeSource: corev1.VolumeSource{
 				Secret: &corev1.SecretVolumeSource{
 					DefaultMode: &config0640AccessMode,
 					SecretName:  name + "-config-data",
 				},
+			},
+		},
+		{
+			Name: "config-data-merged",
+			VolumeSource: corev1.VolumeSource{
+				EmptyDir: &corev1.EmptyDirVolumeSource{Medium: ""},
 			},
 		},
 	}
@@ -61,7 +78,17 @@ func getInitVolumeMounts() []corev1.VolumeMount {
 	return []corev1.VolumeMount{
 		{
 			Name:      "amphora-image",
-			MountPath: "/usr/local/apache2/htdocs",
+			MountPath: "/www",
+		},
+		{
+			Name:      "scripts",
+			MountPath: "/usr/local/bin/container-scripts",
+			ReadOnly:  true,
+		},
+		{
+			Name:      "config-data-merged",
+			MountPath: "/var/lib/config-data/merged",
+			ReadOnly:  false,
 		},
 	}
 }
@@ -71,12 +98,22 @@ func getVolumeMounts() []corev1.VolumeMount {
 	return []corev1.VolumeMount{
 		{
 			Name:      "amphora-image",
-			MountPath: "/usr/local/apache2/htdocs",
+			MountPath: "/www",
+			ReadOnly:  true,
 		},
 		{
-			Name:      "httpd-config",
-			MountPath: "/usr/local/apache2/conf/httpd.conf",
-			SubPath:   "httpd.conf",
+			Name:      "scripts",
+			MountPath: "/usr/local/bin/container-scripts",
+			ReadOnly:  true,
+		},
+		{
+			Name:      "config-data",
+			MountPath: "/var/lib/config-data/default",
+			ReadOnly:  true,
+		},
+		{
+			Name:      "config-data-merged",
+			MountPath: "/var/lib/config-data/merged",
 			ReadOnly:  true,
 		},
 	}
@@ -87,11 +124,33 @@ func ImageUploadDeployment(
 	instance *octaviav1.Octavia,
 	labels map[string]string,
 ) *appsv1.Deployment {
-	initVolumeMounts := getInitVolumeMounts()
-
 	args := []string{"-c", ServiceCommand}
 
 	serviceName := fmt.Sprintf("%s-image-upload", ServiceName)
+
+	// create Volume and VolumeMounts
+	volumes := getVolumes(instance.Name)
+	volumeMounts := getVolumeMounts()
+	initVolumeMounts := getInitVolumeMounts()
+
+	// add CA cert if defined
+	if instance.Spec.OctaviaAPI.TLS.CaBundleSecretName != "" {
+		volumes = append(volumes, instance.Spec.OctaviaAPI.TLS.CreateVolume())
+		volumeMounts = append(volumeMounts, instance.Spec.OctaviaAPI.TLS.CreateVolumeMounts(nil)...)
+		initVolumeMounts = append(initVolumeMounts, instance.Spec.OctaviaAPI.TLS.CreateVolumeMounts(nil)...)
+	}
+
+	if instance.Spec.OctaviaAPI.TLS.API.Enabled(service.EndpointInternal) {
+		tlsEndptCfg := instance.Spec.OctaviaAPI.TLS.API.Internal
+
+		svc, err := tlsEndptCfg.ToService()
+		if err != nil {
+			return nil //, err
+		}
+		volumes = append(volumes, svc.CreateVolume(string(service.EndpointInternal)))
+		volumeMounts = append(volumeMounts, svc.CreateVolumeMounts(string(service.EndpointInternal))...)
+		initVolumeMounts = append(initVolumeMounts, svc.CreateVolumeMounts(string(service.EndpointInternal))...)
+	}
 
 	depl := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
@@ -116,12 +175,12 @@ func ImageUploadDeployment(
 							},
 							Args:         args,
 							Image:        instance.Spec.ApacheContainerImage,
-							VolumeMounts: getVolumeMounts(),
+							VolumeMounts: volumeMounts,
 							Resources:    instance.Spec.Resources,
 							// TODO(gthiemonge) do we need probes?
 						},
 					},
-					Volumes: getVolumes(instance.Name),
+					Volumes: volumes,
 				},
 			},
 		},
@@ -131,29 +190,48 @@ func ImageUploadDeployment(
 		ContainerImage: instance.Spec.AmphoraImageContainerImage,
 		VolumeMounts:   initVolumeMounts,
 	}
-	depl.Spec.Template.Spec.InitContainers = initContainer(initContainerDetails)
+	depl.Spec.Template.Spec.InitContainers = initContainer(instance, initContainerDetails)
 
 	return depl
 }
 
-func initContainer(init ImageUploadDetails) []corev1.Container {
+func initContainer(
+	instance *octaviav1.Octavia,
+	init ImageUploadDetails,
+) []corev1.Container {
 	runAsUser := int64(0)
 	envs := []corev1.EnvVar{
 		{
 			Name:  "DEST_DIR",
-			Value: "/usr/local/apache2/htdocs",
+			Value: "/www",
 		},
 	}
 
 	return []corev1.Container{
 		{
-			Name:  "init",
+			Name: "init",
+			Command: []string{
+				"/bin/bash",
+			},
+			Args: []string{
+				"-c",
+				"/usr/local/bin/container-scripts/image_upload_init.sh",
+			},
+			Image: instance.Spec.ApacheContainerImage,
+			SecurityContext: &corev1.SecurityContext{
+				RunAsUser: &runAsUser,
+			},
+			Env:          envs,
+			VolumeMounts: init.VolumeMounts,
+		},
+		{
+			Name:  "init-image",
 			Image: init.ContainerImage,
 			SecurityContext: &corev1.SecurityContext{
 				RunAsUser: &runAsUser,
 			},
 			Env:          envs,
-			VolumeMounts: getInitVolumeMounts(),
+			VolumeMounts: init.VolumeMounts,
 		},
 	}
 }

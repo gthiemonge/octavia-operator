@@ -19,6 +19,7 @@ package controllers
 import (
 	"bufio"
 	"context"
+	"crypto/tls"
 	"fmt"
 	"net/http"
 	"strings"
@@ -37,7 +38,7 @@ import (
 	common_rbac "github.com/openstack-k8s-operators/lib-common/modules/common/rbac"
 	oko_secret "github.com/openstack-k8s-operators/lib-common/modules/common/secret"
 	"github.com/openstack-k8s-operators/lib-common/modules/common/service"
-	"github.com/openstack-k8s-operators/lib-common/modules/common/tls"
+	common_tls "github.com/openstack-k8s-operators/lib-common/modules/common/tls"
 	"github.com/openstack-k8s-operators/lib-common/modules/common/util"
 	mariadbv1 "github.com/openstack-k8s-operators/mariadb-operator/api/v1beta1"
 	octaviav1 "github.com/openstack-k8s-operators/octavia-operator/api/v1beta1"
@@ -45,6 +46,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	"k8s.io/utils/ptr"
 
 	appsv1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
@@ -1184,7 +1186,14 @@ func (r *OctaviaReconciler) reconcileAmphoraImages(
 		Log.Info("Image Upload Pod not ready")
 		return ctrl.Result{Requeue: true, RequeueAfter: 1 * time.Second}, nil
 	}
-	endpoint, err := svc.GetAPIEndpoint(nil, nil, "")
+
+	// if TLS is enabled
+	var protocol *service.Protocol = nil
+	if instance.Spec.OctaviaAPI.TLS.API.Enabled(service.EndpointInternal) {
+		// set endpoint protocol to https
+		protocol = ptr.To(service.ProtocolHTTPS)
+	}
+	endpoint, err := svc.GetAPIEndpoint(nil, protocol, "")
 	if err != nil {
 		return ctrl.Result{}, err
 	}
@@ -1195,6 +1204,7 @@ func (r *OctaviaReconciler) reconcileAmphoraImages(
 		return ctrl.Result{Requeue: true, RequeueAfter: 1 * time.Second}, err
 	}
 
+	fmt.Printf(">>>>>>> %+v\n\n\n\n\n\n", urlMap)
 	ok, err := octavia.EnsureAmphoraImages(ctx, instance, &r.Log, helper, urlMap)
 	if err != nil {
 		return ctrl.Result{}, err
@@ -1222,6 +1232,9 @@ func (r *OctaviaReconciler) getLocalImageURLs(
 ) ([]octavia.AmphoraImage, error) {
 	// Get the list of images and their hashes
 	listURL := fmt.Sprintf("%s/octavia-amphora-images.sha256sum", endpoint)
+
+	// TODO(gthiemonge) Remove when image-upload uses its own certificate
+	http.DefaultTransport.(*http.Transport).TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
 
 	resp, err := http.Get(listURL)
 	if err != nil {
@@ -1264,9 +1277,9 @@ func (r *OctaviaReconciler) generateServiceConfigMaps(
 
 	cmLabels := labels.GetLabels(instance, labels.GetGroupLabel(octavia.ServiceName), map[string]string{})
 
-	var tlsCfg *tls.Service
+	var tlsCfg *common_tls.Service
 	if instance.Spec.OctaviaAPI.TLS.Ca.CaBundleSecretName != "" {
-		tlsCfg = &tls.Service{}
+		tlsCfg = &common_tls.Service{}
 	}
 
 	// customData hold any customization for the service.
@@ -1304,6 +1317,12 @@ func (r *OctaviaReconciler) generateServiceConfigMaps(
 		),
 	}
 	templateParameters["ServiceUser"] = instance.Spec.ServiceUser
+	templateParameters["TLS"] = false // default TLS to false, and set it bellow to true if enabled
+	if instance.Spec.OctaviaAPI.TLS.API.Enabled(service.EndpointInternal) {
+		templateParameters["TLS"] = true
+		templateParameters["SSLCertificateFile"] = fmt.Sprintf("/var/lib/config-data/merged/%s.crt", string(service.EndpointInternal))
+		templateParameters["SSLCertificateKeyFile"] = fmt.Sprintf("/var/lib/config-data/merged/%s.key", string(service.EndpointInternal))
+	}
 
 	cms := []util.Template{
 		// ScriptsConfigMap
