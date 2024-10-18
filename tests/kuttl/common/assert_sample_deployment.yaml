@@ -244,3 +244,19 @@ commands:
         fi
       done
       exit 0
+  - script: |
+      # Check that the octavia-healthmanager pod has 2 IP addresses on the octavia interface and a route to lb-mgmt-subunet
+      pod=$(oc get pods -n $NAMESPACE -l service=octavia-healthmanager --field-selector=status.phase=Running -o name | head -1)
+      if [ "$pod" = "" ]; then
+        exit 1
+      fi
+      octavia_ip=$(oc get octaviaamphoracontrollers -n $NAMESPACE octavia-healthmanager -o json | jq -r '.status.networkAttachments["'$NAMESPACE'/octavia"][0]')
+      octavia_static_ip=$(oc get configmaps -n $NAMESPACE octavia-hmport-map -o json | jq -r '.data.hm_crc')
+      n_matches=$(oc logs -n $NAMESPACE -c init "$pod" |
+          grep -e "addr $octavia_ip/24 dev octavia" \
+               -e "addr $octavia_static_ip/32 dev octavia" \
+               -e "route 172.24.0.0/16 via 172.23.0.150 dev octavia" | wc -l)
+      if [ "$n_matches" != "3" ]; then
+        exit 1
+      fi
+      exit 0
