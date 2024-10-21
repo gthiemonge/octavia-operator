@@ -1,0 +1,16 @@
+apiVersion: glance.openstack.org/v1beta1
+kind: Glance
+metadata:
+  name: glance
+spec:
+  serviceUser: glance
+  customServiceConfig: |
+    [DEFAULT]
+    debug = true
+    enabled_backends=foo:bar
+  databaseInstance: openstack
+  databaseAccount: glance
+  secret: osp-secret
+  storage:
+    storageClass: local-storage
+    storageRequest: 10G

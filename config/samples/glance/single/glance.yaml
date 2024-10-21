@@ -1,0 +1,23 @@
+apiVersion: glance.openstack.org/v1beta1
+kind: Glance
+metadata:
+  name: glance
+spec:
+  serviceUser: glance
+  databaseInstance: openstack
+  databaseAccount: glance
+  keystoneEndpoint: default
+  customServiceConfig: |
+    [DEFAULT]
+    debug = true
+  glanceAPIs:
+    default:
+      type: single
+      preserveJobs: false
+      replicas: 1
+      imageCache:
+        size: 2G
+  secret: osp-secret
+  storage:
+    storageClass: local-storage
+    storageRequest: 10G

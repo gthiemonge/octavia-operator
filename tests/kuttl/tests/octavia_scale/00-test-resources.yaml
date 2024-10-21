@@ -3,3 +3,5 @@ kind: TestStep
 commands:
   - script: |
       oc kustomize ../../../../config/samples/network-attachment-definition | oc apply -n $NAMESPACE -f -
+  - script: |
+      oc kustomize ../../../../config/samples/glance/single | oc apply -n $NAMESPACE -f -

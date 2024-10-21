@@ -1,0 +1,12 @@
+2024/10/21 12:22:08 running without a 'kuttl-test.yaml' configuration
+2024/10/21 12:22:08 kutt-test config testdirs is overridden with args: [ ./tests/kuttl/tests ]
+=== RUN   kuttl
+    harness.go:464: starting setup
+    harness.go:255: running tests using configured kubeconfig.
+    harness.go:278: Successful connection to cluster at: https://api.crc.testing:6443
+    harness.go:363: running tests
+    harness.go:373: open /home/zuul/octavia-operator/config/samples/glance/tests/kuttl/tests: no such file or directory
+    harness.go:515: cleaning up
+    harness.go:572: removing temp folder: ""
+--- FAIL: kuttl (0.02s)
+FAIL
