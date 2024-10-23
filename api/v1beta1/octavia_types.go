@@ -17,6 +17,8 @@ limitations under the License.
 package v1beta1
 
 import (
+	"fmt"
+
 	"github.com/openstack-k8s-operators/lib-common/modules/common/condition"
 	"github.com/openstack-k8s-operators/lib-common/modules/common/util"
 	corev1 "k8s.io/api/core/v1"
@@ -42,7 +44,7 @@ const (
 	ApacheContainerImage = "registry.redhat.io/ubi9/httpd-24:latest"
 
 	// Octavia API timeout
-	APITimeout = "120"
+	APITimeout = 120
 )
 
 // OctaviaSpec defines the desired state of Octavia
@@ -204,9 +206,10 @@ type OctaviaSpecBase struct {
 	// Apache Container Image URL
 	ApacheContainerImage string `json:"apacheContainerImage"`
 
-	// +kubebuilder:validation:Optional
+	// +kubebuilder:validation:Required
+	// +kubebuilder:default=120
 	// Octavia API timeout
-	APITimeout string `json:"apiTimeout,omitempty"`
+	APITimeout int `json:"apiTimeout"`
 
 	// +kubebuilder:validation:Required
 	// +kubebuilder:default=octavia
@@ -366,7 +369,7 @@ func SetupDefaults() {
 		HealthManagerContainerImageURL: util.GetEnvVar("RELATED_IMAGE_OCTAVIA_HEALTHMANAGER_IMAGE_URL_DEFAULT", OctaviaHealthManagerContainerImage),
 		WorkerContainerImageURL:        util.GetEnvVar("RELATED_IMAGE_OCTAVIA_WORKER_IMAGE_URL_DEFAULT", OctaviaWorkerContainerImage),
 		ApacheContainerImageURL:        util.GetEnvVar("RELATED_IMAGE_OCTAVIA_APACHE_IMAGE_URL_DEFAULT", ApacheContainerImage),
-		OctaviaAPIRouteTimeout:         util.GetEnvVar("OCTAVIA_API_TIMEOUT", APITimeout),
+		OctaviaAPIRouteTimeout:         util.GetEnvVar("OCTAVIA_API_TIMEOUT", fmt.Sprintf("%d", APITimeout)),
 		// No default for AmphoraImageContainerImageURL
 	}
 
