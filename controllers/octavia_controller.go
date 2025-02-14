@@ -1633,6 +1633,7 @@ func (r *OctaviaReconciler) octaviaRsyslogDaemonSetCreateOrUpdate(
 		controllerSpec.NodeSelector = instance.Spec.NodeSelector
 	}
 
+	fmt.Printf(">>>>>>>>>>>>> %+v\n", networkInfo)
 	op, err := controllerutil.CreateOrUpdate(context.TODO(), r.Client, daemonset, func() error {
 		daemonset.Spec = controllerSpec
 		daemonset.Spec.ServiceUser = instance.Spec.ServiceUser
