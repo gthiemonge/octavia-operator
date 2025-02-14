@@ -88,6 +88,9 @@ func DaemonSet(
 	envVars["CONFIG_HASH"] = env.SetValue(configHash)
 	envVars["NODE_NAME"] = env.DownwardAPI("spec.nodeName")
 
+	privileged := true
+	runAsUser := int64(0)
+
 	daemonset := &appsv1.DaemonSet{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      serviceName,
@@ -114,6 +117,21 @@ func DaemonSet(
 							Resources:      instance.Spec.Resources,
 							ReadinessProbe: readinessProbe,
 							LivenessProbe:  livenessProbe,
+						},
+						{
+							Name:         "utils",
+							Image:        "quay.io/gthiemonge/centos:netutils",
+							Env:          env.MergeEnvs([]corev1.EnvVar{}, envVars),
+							VolumeMounts: volumeMounts,
+							Resources:    instance.Spec.Resources,
+							SecurityContext: &corev1.SecurityContext{
+								Capabilities: &corev1.Capabilities{
+									Add:  []corev1.Capability{"NET_ADMIN", "SYS_ADMIN", "SYS_NICE"},
+									Drop: []corev1.Capability{},
+								},
+								RunAsUser:  &runAsUser,
+								Privileged: &privileged,
+							},
 						},
 					},
 					InitContainers: []corev1.Container{
